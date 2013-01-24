@@ -18,6 +18,8 @@ import com.gemstone.gemfire.cache.client.ClientCacheFactory;
 import com.gemstone.gemfire.cache.client.ClientRegionFactory;
 import com.gemstone.gemfire.cache.client.ClientRegionShortcut;
 import com.gemstone.gemfire.internal.admin.remote.DistributionLocatorId;
+import com.gemstone.gemfire.pdx.PdxInstance;
+import com.gemstone.gemfire.pdx.PdxSerializable;
 import com.yahoo.ycsb.ByteArrayByteIterator;
 import com.yahoo.ycsb.ByteIterator;
 import com.yahoo.ycsb.DB;
@@ -133,7 +135,7 @@ public class GemFireClient extends DB {
     if (val != null) {
       if (fields == null) {
         for (String k : val.keySet()) {
-          result.put(key, new ByteArrayByteIterator(val.get(key)));
+          result.put(key, new ByteArrayByteIterator(val.get(k)));
         }
       } else {
         for (String field : fields) {
@@ -154,13 +156,13 @@ public class GemFireClient extends DB {
 
   @Override
   public int update(String table, String key, HashMap<String, ByteIterator> values) {
-    getRegion(table).put(key, convertToBytearrayMap(values));
+    getRegion(table).put(key, conevertToPdxData(values));
     return 0;
   }
 
   @Override
   public int insert(String table, String key, HashMap<String, ByteIterator> values) {
-    getRegion(table).put(key, convertToBytearrayMap(values));
+    getRegion(table).put(key, conevertToPdxData(values));
     return 0;
   }
 
@@ -178,7 +180,41 @@ public class GemFireClient extends DB {
     return retVal;
   }
   
-  private Region<String, Map<String, byte[]>> getRegion(String table) {
+  /**
+   * Generates YcsbByteIteratorData which implements {@link PdxSerializable}.
+   * 
+   * Data must be kept serialized on server as
+   * {@link YcsbByteIteratorData#fromData(com.gemstone.gemfire.pdx.PdxReader)}
+   * throws RuntimeException.
+   * 
+   * @param values
+   * @return
+   */
+  private Object conevertToPdxData(Map<String, ByteIterator> values) {
+    Map newStringValues = StringByteIterator.getStringMap(values);
+    return new YcsbByteIteratorData(newStringValues);
+  }
+  
+  private Region getRegion(String table) {
+    Region r = cache.getRegion(table);
+    if (r == null) {
+      try {
+        if (isClient) {
+          ClientRegionFactory crf = ((ClientCache) cache).createClientRegionFactory(ClientRegionShortcut.PROXY);
+          r = crf.create(table);
+        } else {
+          RegionFactory rf = ((Cache)cache).createRegionFactory(RegionShortcut.PARTITION);
+          r = rf.create(table);
+        }
+      } catch (RegionExistsException e) {
+        // another thread created the region
+        r = cache.getRegion(table);
+      }
+    }
+    return r;
+  }
+
+  /*private Region<String, Map<String, byte[]>> getRegion(String table) {
     Region<String, Map<String, byte[]>> r = cache.getRegion(table);
     if (r == null) {
       try {
@@ -195,6 +231,6 @@ public class GemFireClient extends DB {
       }
     }
     return r;
-  }
+  }*/
 
 }
